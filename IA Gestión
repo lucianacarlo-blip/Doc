@@ -1,0 +1,353 @@
+const {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  AlignmentType, HeadingLevel, BorderStyle, WidthType, ShadingType,
+  VerticalAlign, PageNumber, PageBreak, LevelFormat, TableOfContents
+} = require('docx');
+const fs = require('fs');
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+// Build a paragraph that mixes bold "creatividad" with normal text.
+// Pass an array of {text, bold?, italic?, size?} or a plain string.
+function p(runs, opts = {}) {
+  const children = [];
+  if (typeof runs === 'string') {
+    // auto-bold every "creatividad" occurrence
+    runs = splitBold(runs);
+  }
+  for (const r of runs) {
+    children.push(new TextRun({
+      text: r.text,
+      bold: r.bold || false,
+      italics: r.italic || false,
+      size: r.size || 24,
+      font: 'Arial',
+    }));
+  }
+  return new Paragraph({
+    children,
+    spacing: { after: 160, line: 360 },
+    alignment: opts.align || AlignmentType.JUSTIFIED,
+    heading: opts.heading || undefined,
+    indent: opts.indent,
+  });
+}
+
+// Split a string so every occurrence of "creatividad" gets a bold run
+function splitBold(str) {
+  const keyword = /creatividad/gi;
+  const result = [];
+  let lastIdx = 0;
+  let match;
+  while ((match = keyword.exec(str)) !== null) {
+    if (match.index > lastIdx) {
+      result.push({ text: str.slice(lastIdx, match.index) });
+    }
+    result.push({ text: match[0], bold: true });
+    lastIdx = match.index + match[0].length;
+  }
+  if (lastIdx < str.length) result.push({ text: str.slice(lastIdx) });
+  return result.length ? result : [{ text: str }];
+}
+
+function heading1(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    spacing: { before: 320, after: 160 },
+    children: [new TextRun({ text, bold: true, size: 28, font: 'Arial', allCaps: false })],
+  });
+}
+
+function heading2(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    spacing: { before: 240, after: 120 },
+    children: [new TextRun({ text, bold: true, size: 26, font: 'Arial', italics: true })],
+  });
+}
+
+function bullet(str, level = 0) {
+  return new Paragraph({
+    numbering: { reference: 'bullets', level },
+    spacing: { after: 100, line: 360 },
+    children: splitBold(str).map(r => new TextRun({ ...r, size: 24, font: 'Arial' })),
+  });
+}
+
+// thin border helper
+const thinBorder = { style: BorderStyle.SINGLE, size: 1, color: 'AAAAAA' };
+const allBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+const headerShade = { fill: 'D9E2F3', type: ShadingType.CLEAR };
+
+function tableRow(cells, isHeader = false) {
+  return new TableRow({
+    tableHeader: isHeader,
+    children: cells.map((txt, i) => new TableCell({
+      borders: allBorders,
+      shading: isHeader ? headerShade : { fill: 'FFFFFF', type: ShadingType.CLEAR },
+      margins: { top: 80, bottom: 80, left: 140, right: 140 },
+      width: { size: i === 0 ? 3200 : 3080, type: WidthType.DXA },
+      verticalAlign: VerticalAlign.CENTER,
+      children: [new Paragraph({
+        alignment: AlignmentType.LEFT,
+        spacing: { after: 0 },
+        children: [new TextRun({ text: txt, size: 22, font: 'Arial', bold: isHeader })],
+      })],
+    })),
+  });
+}
+
+function buildTable(headers, rows) {
+  const colWidths = [3200, 3080, 3080];
+  return new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: colWidths.slice(0, headers.length),
+    rows: [
+      tableRow(headers, true),
+      ...rows.map(r => tableRow(r, false)),
+    ],
+  });
+}
+
+function pageBreak() {
+  return new Paragraph({ children: [new PageBreak()], spacing: { after: 0 } });
+}
+
+function emptyLine() {
+  return new Paragraph({ children: [new TextRun('')], spacing: { after: 0 } });
+}
+
+function footerNote(text) {
+  return new Paragraph({
+    spacing: { before: 80, after: 80 },
+    children: splitBold(text).map(r => new TextRun({ ...r, size: 18, font: 'Arial', italics: true })),
+  });
+}
+
+// ─── document content ───────────────────────────────────────────────────────
+
+const coverPage = [
+  emptyLine(), emptyLine(), emptyLine(),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 200 },
+    children: [new TextRun({ text: 'IB DP Gestión Empresarial – NM / NS', size: 24, font: 'Arial', bold: true })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 400 },
+    children: [new TextRun({ text: 'Evaluación Interna – Proyecto de Investigación Empresarial', size: 24, font: 'Arial' })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 280 },
+    children: [new TextRun({ text: '¿De qué manera la creatividad en la estrategia de marketing inclusivo impactó en el posicionamiento de Fenty Beauty en la industria cosmética?', size: 26, font: 'Arial', bold: true })],
+  }),
+  emptyLine(),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 140 },
+    children: [new TextRun({ text: 'Concepto clave: CREATIVIDAD', size: 24, font: 'Arial', bold: true, allCaps: false })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 140 },
+    children: [new TextRun({ text: 'Organización: Fenty Beauty', size: 24, font: 'Arial' })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 140 },
+    children: [new TextRun({ text: 'Alumna: Luciana Carlo Mallqui', size: 24, font: 'Arial' })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 140 },
+    children: [new TextRun({ text: 'Convocatoria: Mayo 202X', size: 24, font: 'Arial' })],
+  }),
+  new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { after: 140 },
+    children: [new TextRun({ text: 'Recuento de palabras: 1 741', size: 24, font: 'Arial' })],
+  }),
+  pageBreak(),
+];
+
+// ── TOC page ──────────────────────────────────────────────────────────────
+const tocPage = [
+  heading1('Índice'),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '1. Introducción ............................................................................................................  3', size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '2. La creatividad en el mix de marketing de Fenty Beauty .........................................  4', size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '3. Impacto en el posicionamiento competitivo ..........................................................  5', size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '4. Sostenibilidad de la ventaja: evaluación crítica ....................................................  6', size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '5. Conclusiones .............................................................................................................  8', size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: '6. Bibliografía .................................................................................................................  9', size: 24, font: 'Arial' })] }),
+  pageBreak(),
+];
+
+// ── 1. INTRODUCCIÓN ──────────────────────────────────────────────────────
+const intro = [
+  heading1('1. Introducción'),
+  p('Fenty Beauty fue fundada en septiembre de 2017 por la artista Robyn Rihanna Fenty en asociación estratégica con LVMH Moët Hennessy Louis Vuitton. La marca irrumpió en el mercado cosmético con un lanzamiento simultáneo en 17 países y una gama inicial de 40 tonos de base —posteriormente ampliada a 50—, respondiendo a una brecha histórica de representación en la industria. Para 2023, Fenty Beauty generó 602,4 millones de dólares en ingresos, consolidándose como la marca de belleza de una celebridad con mayores ingresos a nivel global (DA4, Statista, 2023).'),
+  p('El mercado cosmético global está proyectado a alcanzar los 132 mil millones de dólares para 2029, lo que convierte la diferenciación en un desafío estratégico central ante la creciente saturación del sector (DA4). En este contexto, dos interrogantes delimitan el problema: ¿cómo construir una propuesta única de venta en un mercado saturado? ¿Y puede esta ventaja mantenerse cuando los competidores replican con rapidez la estrategia innovadora? La presente investigación examina la siguiente pregunta de investigación: ¿De qué manera la creatividad en la estrategia de marketing inclusivo impactó en el posicionamiento de Fenty Beauty en la industria cosmética?'),
+  p('La creatividad —definida como el proceso de generar nuevas ideas y considerar las ideas existentes desde nuevas perspectivas, reconociendo el valor de las ideas al elaborar respuestas innovadoras a los problemas (Programa del Diploma IB, 2022)— constituye el lente conceptual de esta investigación. Este concepto resulta pertinente dado que el posicionamiento diferenciado de Fenty Beauty se construyó a partir de decisiones de marketing no convencionales que transformaron las normas de la industria: en producto, precio, plaza y promoción. La creatividad no solo describe el origen de su propuesta de valor, sino que permite evaluar si dicha ventaja es sostenible.'),
+  p('La metodología empleada es investigación secundaria, sustentada en cinco documentos de apoyo: un artículo académico de Harvard Business Review (DA1), un informe de McKinsey & Company (DA2), un artículo de Vogue (DA3), datos cuantitativos de Statista (DA4) y un estudio de caso académico (DA5). Las herramientas de gestión empresarial aplicadas son: el mix de marketing (4Ps), la estrategia de diferenciación de Porter, el mapa de posicionamiento y el marco de equidad de marca de Aaker.'),
+  pageBreak(),
+];
+
+// ── 2. MIX DE MARKETING ──────────────────────────────────────────────────
+const section2 = [
+  heading1('2. La creatividad en el mix de marketing de Fenty Beauty'),
+  p('El mix de marketing (4Ps) permite evidenciar cómo la creatividad se expresó de forma transversal en la estrategia comercial de Fenty Beauty, trascendiendo la dimensión del producto para abarcar cada variable de su entrada al mercado (DA3; DA5).'),
+  heading2('Producto'),
+  p('Previo al lanzamiento de Fenty Beauty, los competidores concentraban el 77% de sus tonos de base en pieles claras y medias, dejando desatendidos a consumidores de tonos más oscuros (DA5). La creatividad de Fenty Beauty consistió en distribuir equitativamente 40 tonalidades a lo largo de todo el espectro cromático, cubriendo ambos extremos con igual representación. Esta decisión fue reconocida por la revista Time como una de las 25 mejores invenciones de 2017 (DA3), evidenciando que la innovación de producto respondía a una necesidad latente del mercado que la competencia había ignorado sistemáticamente. En este sentido, la creatividad no operó como un artificio estético, sino como una solución funcional a un problema de acceso.'),
+  heading2('Promoción'),
+  p('La estrategia promocional incorporó tres decisiones creativas que rompieron con las convenciones del marketing de lujo. Primero, el uso de microinfluencers con tonos de piel oscuros —en lugar de celebridades de alto perfil— representó una elección inusual en el sector en 2017, dado que el paradigma dominante priorizaba el alcance masivo sobre la representación (DA3). Segundo, el lanzamiento apoyado en contenido generado por la comunidad denominada "Fenty Family" aprovechó la autenticidad como activo diferenciador, construyendo una narrativa de co-pertenencia entre la marca y sus consumidoras. Tercero, la "Fenty Beauty House" establecida en Los Ángeles en 2020 —donde creadores de TikTok producían contenido orgánico— generó tasas de apertura de email superiores al promedio de la industria del 23,8% (DA5). Estas tres decisiones demuestran que la creatividad en la comunicación produjo resultados cuantificables, no solo simbólicos.'),
+  heading2('Precio y plaza'),
+  p('La decisión de posicionarse en el segmento mid-range (22–40 dólares por base) constituyó una elección creativa al desvincularse del modelo de lujo exclusivo tradicional de LVMH, democratizando el acceso sin sacrificar la percepción de calidad (DA3). Esta tensión entre accesibilidad y aspiracionalidad representa, en sí misma, una solución creativa a un dilema de negocio convencional. En cuanto a la plaza, la distribución simultánea en Sephora en 17 países desde el primer día sustituyó el modelo tradicional de expansión gradual por mercados, amplificando el impacto del lanzamiento y generando una percepción de marca global desde su origen (DA3).'),
+  p('Una limitación de este análisis reside en que las fuentes secundarias no permiten aislar con exactitud la contribución de cada variable P al posicionamiento final, ya que el reconocimiento previo de Rihanna como figura pública podría operar como variable confusora en la atribución de resultados financieros.'),
+  pageBreak(),
+];
+
+// ── 3. POSICIONAMIENTO ────────────────────────────────────────────────────
+const posTable = buildTable(
+  ['Marca', 'Nivel de inclusividad', 'Percepción precio / calidad'],
+  [
+    ['Maybelline', 'Alta', 'Baja (mass market)'],
+    ['MAC', 'Media', 'Alta (semi-lujo)'],
+    ['NARS', 'Baja', 'Alta (lujo)'],
+    ['Fenty Beauty', 'Máxima', 'Mid-premium (accesible)'],
+  ]
+);
+
+const section3 = [
+  heading1('3. Impacto en el posicionamiento competitivo'),
+  p('La estrategia de diferenciación de Porter sostiene que una empresa genera ventaja competitiva cuando el cliente percibe un valor único que justifica su disposición a pagar un precio superior o su preferencia sobre la oferta rival (DA2, McKinsey, 2023). En Fenty Beauty, la creatividad permitió construir una propuesta de valor bidimensional que la diferenciación tradicional del sector no había contemplado.'),
+  p('A nivel funcional, la distribución de tonos de Fenty Beauty superaba a competidores directos como MAC, L\'Oréal y Make Up For Ever, quienes no ofrecían cobertura equivalente en tonos oscuros en 2017 (DA5). A nivel emocional, la marca ofreció representación de identidad cultural a segmentos históricamente subrepresentados, generando una conexión afectiva que HBR identificó como motor de lealtad a largo plazo (DA1). La combinación de ambas dimensiones —funcional y emocional— amplificó el impacto de la creatividad más allá de lo que cualquier atributo del producto, de forma aislada, habría logrado.'),
+  p('El siguiente mapa de posicionamiento ilustra el impacto de esta creatividad diferenciadora al momento del lanzamiento en 2017, con ejes de nivel de inclusividad (horizontal) y percepción precio/calidad (vertical):'),
+  emptyLine(),
+  new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: 'Figura 1: Mapa de posicionamiento competitivo de Fenty Beauty (2017)', size: 20, font: 'Arial', italics: true })] }),
+  posTable,
+  emptyLine(),
+  p('Fenty Beauty ocupó un espacio vacío en el mapa competitivo —máxima inclusividad a precio mid-premium—, confirmando que la creatividad generó un posicionamiento genuinamente único al momento de su lanzamiento. McKinsey refuerza esta evidencia al señalar que las marcas que incorporan diversidad e inclusión en su propuesta de valor presentan una probabilidad 39% mayor de superar financieramente a sus competidores (DA2), estableciendo un vínculo empírico entre creatividad inclusiva y rendimiento empresarial medible. Este dato cuantitativo es particularmente relevante porque sugiere que la creatividad en marketing inclusivo no es únicamente una decisión ética, sino también una ventaja estratégica con implicaciones financieras demostrables.'),
+  pageBreak(),
+];
+
+// ── 4. SOSTENIBILIDAD ─────────────────────────────────────────────────────
+const aakerTable = buildTable(
+  ['Dimensión de Aaker', 'Evaluación para Fenty Beauty'],
+  [
+    ['Calidad percibida', 'Alta: fórmula premiada por Time + autoridad de Rihanna (DA3)'],
+    ['Notoriedad de marca', 'Alta: 2.ª marca de celebridad más buscada globalmente, 2023 (DA4)'],
+    ['Asociaciones de marca', 'Fuertes: inclusión y autenticidad como valores centrales (DA1; DA2)'],
+    ['Lealtad de marca', 'Presionada por Rare Beauty y Rhode en el mismo segmento (DA5)'],
+    ['Otros activos de marca', 'Comunidad "Fenty Family" y cultura de co-creatividad con el consumidor'],
+  ]
+);
+
+const section4 = [
+  heading1('4. Sostenibilidad de la ventaja: evaluación crítica'),
+  p('Sin embargo, la ventaja competitiva derivada de la creatividad enfrenta cuestionamientos de sostenibilidad que requieren análisis crítico. El denominado "Fenty Effect" provocó que competidores como L\'Oréal, Maybelline y MAC ampliaran sus gamas a más de 40 tonos en menos de 18 meses tras el lanzamiento de Fenty Beauty (DA1, HBR, 2023). Este fenómeno demuestra que la creatividad expresada exclusivamente en atributos de producto es imitable a corto plazo, erosionando la diferenciación de Porter e igualando progresivamente el campo competitivo. Lo que en 2017 era una innovación disruptiva, para 2019 se había convertido en un estándar de la industria.'),
+  p('Para evaluar si la ventaja competitiva es sostenible a largo plazo, se aplica el marco de equidad de marca de Aaker, que mide la fortaleza de una marca bajo cinco dimensiones:'),
+  emptyLine(),
+  new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: 'Tabla 1: Marco de equidad de marca de Aaker aplicado a Fenty Beauty', size: 20, font: 'Arial', italics: true })] }),
+  aakerTable,
+  emptyLine(),
+  p('El análisis de Aaker revela que la ventaja competitiva de Fenty Beauty no reside ya en el producto —fácilmente replicable—, sino en la equidad de marca construida a través de la creatividad (DA1; DA2). Esta equidad acumula activos intangibles —confianza del consumidor, autenticidad percibida y comunidad activa— significativamente más difíciles de imitar que una gama amplia de tonos de base. La dimensión de "otros activos de marca", en particular, evidencia que la creatividad de Fenty Beauty evolucionó de ser un atributo del producto a convertirse en una cultura organizacional de co-creatividad con el consumidor, lo que eleva el costo de imitación para los competidores.'),
+  p('HBR argumenta que las marcas inclusivas deben innovar de forma continua para mantener la lealtad del consumidor; la creatividad no puede ser un evento puntual, sino un proceso institucionalizado dentro de la organización (DA1). En 2024, Fenty Beauty compite en el mismo espacio de alta inclusividad con Rare Beauty y Rhode, marcas que capitalizan en narrativas de autenticidad similares, lo que genera incertidumbre legítima sobre si Fenty puede sostener su diferenciación sin nuevas expresiones de creatividad que trasciendan el producto original (DA5). Un supuesto implícito en este análisis es que la lealtad del consumidor permanece estable ante la ampliación de opciones inclusivas; sin embargo, el comportamiento real del consumidor ante mercados más diversos y segmentados podría ser más volátil de lo que las fuentes secundarias permiten capturar con precisión. Adicionalmente, la investigación se basa exclusivamente en fuentes secundarias; datos primarios sobre percepciones actuales del consumidor ofrecerían una evaluación más robusta de la lealtad y la equidad de marca en el momento actual.'),
+  pageBreak(),
+];
+
+// ── 5. CONCLUSIONES ──────────────────────────────────────────────────────
+const conclusions = [
+  heading1('5. Conclusiones'),
+  p('La creatividad en la estrategia de marketing inclusivo de Fenty Beauty impactó positiva y mesurablemente su posicionamiento en la industria cosmética, aunque con matices temporales que exigen distinción entre el corto y el largo plazo.'),
+  p('A corto plazo, el análisis del mix de marketing y la diferenciación de Porter demuestran que la creatividad generó un posicionamiento diferenciado al ocupar un espacio vacío en el mapa competitivo —máxima inclusividad a precio mid-premium—. Sin embargo, el "Fenty Effect" confirma que esta ventaja basada en atributos de producto es imitable a corto plazo, lo que limita su sostenibilidad como fuente única de diferenciación.'),
+  p('A largo plazo, el marco de equidad de marca de Aaker indica que la creatividad construyó activos intangibles —notoriedad, asociaciones de marca y comunidad activa— que constituyen una ventaja más durable y difícilmente replicable. La evidencia cuantitativa respalda esta conclusión: 602,4 millones de dólares en ingresos en 2023 (DA4) y una probabilidad 39% mayor de superar financieramente a competidores para marcas inclusivas (DA2), cifras que confirman que la creatividad de Fenty Beauty fue una ventaja estratégica medible, no solo una declaración de valores.'),
+  p('En consecuencia, la creatividad de Fenty Beauty no solo impactó su posicionamiento inicial, sino que edificó una equidad de marca que trasciende el producto y que opera como barrera de imitación a largo plazo. El mix de marketing demuestra además que la creatividad estuvo presente en todas las 4Ps, no únicamente en la formulación del producto, lo que reforzó la coherencia y la credibilidad de su propuesta de valor ante el consumidor.'),
+  p('No obstante, persiste la interrogante sobre cómo Fenty Beauty puede institucionalizar la creatividad frente a la creciente competencia de Rare Beauty y Rhode en el segmento de alta inclusividad. Futuras investigaciones con fuentes primarias sobre lealtad y percepción actual del consumidor permitirían evaluar con mayor precisión la sostenibilidad de esta ventaja competitiva en un mercado en constante reconfiguración.'),
+  pageBreak(),
+];
+
+// ── 6. BIBLIOGRAFÍA ──────────────────────────────────────────────────────
+const bibliography = [
+  heading1('6. Bibliografía'),
+  new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: 'Documentos de apoyo', bold: true, size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'DA1 – Harvard Business Review (2023). How Fenty Beauty changed the conversation on inclusivity in beauty. HBR Online.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'DA2 – McKinsey & Company (2023). The Beauty Market in 2023: A Special State of Fashion Report. McKinsey Institute.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'DA3 – Vogue Business (2022). How Fenty Beauty\'s launch strategy disrupted the beauty industry. Vogue Business.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'DA4 – Statista (2023). Fenty Beauty revenue worldwide 2017–2023. Statista Research Department.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: 'DA5 – Estudio de caso académico (2023). Fenty Beauty: Redefining beauty standards through inclusive marketing. Business Case Repository.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: 'Fuentes adicionales', bold: true, size: 24, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'Aaker, D. A. (1991). Managing Brand Equity: Capitalizing on the Value of a Brand Name. Free Press.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'Porter, M. E. (1985). Competitive Advantage: Creating and Sustaining Superior Performance. Free Press.', size: 22, font: 'Arial' })] }),
+  new Paragraph({ spacing: { after: 100 }, children: [new TextRun({ text: 'International Baccalaureate Organization (2022). Business Management Guide. IBO.', size: 22, font: 'Arial' })] }),
+];
+
+// ── assemble document ──────────────────────────────────────────────────────
+const doc = new Document({
+  numbering: {
+    config: [
+      {
+        reference: 'bullets',
+        levels: [{
+          level: 0,
+          format: LevelFormat.BULLET,
+          text: '\u2022',
+          alignment: AlignmentType.LEFT,
+          style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+        }],
+      },
+    ],
+  },
+  styles: {
+    default: {
+      document: { run: { font: 'Arial', size: 24 } },
+    },
+    paragraphStyles: [
+      {
+        id: 'Heading1', name: 'Heading 1', basedOn: 'Normal', next: 'Normal', quickFormat: true,
+        run: { size: 28, bold: true, font: 'Arial', color: '1F3864' },
+        paragraph: { spacing: { before: 280, after: 160 }, outlineLevel: 0 },
+      },
+      {
+        id: 'Heading2', name: 'Heading 2', basedOn: 'Normal', next: 'Normal', quickFormat: true,
+        run: { size: 24, bold: true, italics: true, font: 'Arial', color: '2E5396' },
+        paragraph: { spacing: { before: 200, after: 100 }, outlineLevel: 1 },
+      },
+    ],
+  },
+  sections: [{
+    properties: {
+      page: {
+        size: { width: 11906, height: 16838 },
+        margin: { top: 1440, right: 1260, bottom: 1440, left: 1440 },
+      },
+    },
+    footers: {
+      default: new (require('docx').Footer)({
+        children: [new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new TextRun({ text: 'Luciana Carlo Mallqui  |  Fenty Beauty  |  ', size: 18, font: 'Arial' }),
+            new TextRun({ children: [PageNumber.CURRENT], size: 18, font: 'Arial' }),
+          ],
+        })],
+      }),
+    },
+    children: [
+      ...coverPage,
+      ...tocPage,
+      ...intro,
+      ...section2,
+      ...section3,
+      ...section4,
+      ...conclusions,
+      ...bibliography,
+    ],
+  }],
+});
+
+Packer.toBuffer(doc).then(buf => {
+  fs.writeFileSync('/home/claude/IA_Fenty_Beauty_LucianaCarlo.docx', buf);
+  console.log('Done.');
+});
